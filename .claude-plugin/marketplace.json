@@ -1,0 +1,15 @@
+{
+  "name": "chonk",
+  "description": "chonk — a Claude Code plugin that notices when your session has gotten too big.",
+  "owner": {
+    "name": "Suprhimp",
+    "url": "https://github.com/Suprhimp"
+  },
+  "plugins": [
+    {
+      "name": "chonk",
+      "source": "./",
+      "description": "Tells you when your Claude Code session has gotten too big, and offers a handoff to a fresh one."
+    }
+  ]
+}
