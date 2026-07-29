@@ -23,7 +23,7 @@ Claude Code will happily let a single session run for 98 hours. It auto-compacts
 ```
 > add a loading state to the upload button
 
-[chonk] This session is ~612K cumulative tokens — MEGACHONKER.
+[chonk] Context is ~612K tokens — MEGACHONKER.
 
 Before I do that — this session has gotten pretty large, and every turn
 from here re-reads all of it. Want to wrap up and start fresh?
@@ -58,6 +58,19 @@ Cost per request is **linear in context size** — there is no knee, no cliff, n
 | 300–400K | $0.31 |
 | 800K+ | **$0.74** |
 
+### What to measure
+
+The obvious thing to count is how much the session has produced. That turns out to be the wrong number. Cost comes from *re-reading* the same history every turn, not from generating new text — so a session can sit at 999K context for 800 turns while its cumulative output barely moves.
+
+Measured across the same 342 sessions, by what share of total spend each trigger would catch:
+
+| threshold | cumulative session tokens | live context |
+|---|---|---|
+| 350K | 10 sessions · **34%** of spend | 76 sessions · 89% |
+| 500K | 2 sessions · 15% | 48 sessions · **80%** |
+
+Four of the eight most expensive sessions filled the window to ~999K while never crossing 350K cumulative. chonk reads live context for exactly this reason.
+
 Which means there's exactly one lever: **notice sooner, start a new session.** Not a smarter cache, not a cheaper model — just don't carry 800K tokens of history into a question that needed 20K.
 
 The catch is that starting over feels expensive, because you have to rebuild the context in your head. So chonk writes the handoff for you. That's the actual product; the threshold detection is just the trigger.
@@ -78,12 +91,22 @@ claude --plugin-dir ./chonk
 
 Requires `python3` (already on macOS and most Linux). No dependencies, no network calls, no telemetry — it reads one local file and prints one line.
 
+Not using plugins? Drop `scripts/chonk.py` anywhere and register it in `~/.claude/settings.json` — user scope, so it covers every project and worktree at once:
+
+```json
+{ "hooks": { "UserPromptSubmit": [{ "hooks": [
+  { "type": "command", "command": "python3 \"$HOME/.claude/hooks/chonk.py\"", "timeout": 10 }
+]}]}}
+```
+
+Project-scoped `.claude/settings.json` only covers that one checkout, which is an easy way to install a guardrail that never fires.
+
 ## The Chonk Chart
 
 Each time the session grows past another band, chonk moves one rung up. This is how you tell the second nudge from the fourth without reading the number.
 
 ```
-        350K                600K                850K                1.1M
+        500K                700K                900K                1.1M
                                                                   /\_/\
   ┌───────────┐       ┌───────────┐           /\_/\              ( -.- )
   │           │       │   /\_/\   │       ┌──( -.- )──┐       ┌─(       )─┐
@@ -102,22 +125,24 @@ Run `/plugin config chonk`, or leave it alone — the defaults are measured, not
 
 | option | default | what it does |
 |---|---|---|
-| **First nudge at** | `350000` | Cumulative session tokens before chonk first speaks up |
-| **Re-arm every** | `250000` | How much further growth before it speaks again |
+| **First nudge at** | `500000` | Live context tokens before chonk first speaks up |
+| **Re-arm every** | `200000` | How much further growth before it speaks again |
 
-The defaults sit at roughly the 99th percentile of a real 1,145-session sample (p90 83K, p95 133K, p99 314K, max 2.4M). That's deliberate: chonk should fire on the sessions that are genuinely out of hand, not the merely long ones.
+500K is about half the 1M window, and the point where the nudge covers ~80% of spend in the sample above. Simulated over 48 days of real sessions it fires about twice a day across ~7 concurrent sessions — roughly one session in three.
 
-**Your distribution is not mine.** If you work in short bursts you may never see a nudge; if you run overnight agent sessions you may want to lower it. Two numbers, one dialog.
+Drop it to 400K to cover 89% instead of 80%, at ~3 nudges/day. Raise it to 700K for ~1/day and 64% coverage.
 
-The re-arm matters more than the first threshold. A session that hits 350K and gets nudged once will often run to 2M anyway — the reminders at 600K, 850K, and 1.1M are what actually curb it.
+**Your distribution is not mine.** If you work in short bursts you may never see a nudge; if you run overnight agent sessions you may want it lower. Two numbers, one dialog.
+
+The re-arm matters more than the first threshold. A session nudged once at 500K will often run to the wall anyway — the reminders at 700K and 900K are what actually curb it.
 
 ## How it works
 
-A `UserPromptSubmit` hook runs before each of your messages, reads the session transcript, and adds up every block that costs text tokens: message text, tool call inputs, and tool result contents. In a coding session the tool blocks — file reads, greps, command output — are the overwhelming majority, so anything that counts only the prose you can see will undercount by an order of magnitude or more.
+A `UserPromptSubmit` hook runs before each of your messages and reads one number out of the session transcript: `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` from the most recent assistant turn. That is the exact prompt size the API billed for that request.
 
-Image blocks are skipped on purpose. Base64 length has nothing to do with image token cost, and one screenshot would blow the estimate past every threshold at once.
+Reading the billed number instead of estimating gets several things for free. Tool results, images, the system prompt, and tool schemas are all counted, because the API counted them. It needs no tokenizer and is not thrown off by CJK text. And it *drops* after a compaction, so a compacted session goes quiet again instead of staying flagged forever.
 
-If the total crosses a band that hasn't fired yet, chonk prints one line to stdout, which Claude Code injects as context for that turn. It records the band in a temp file so the same rung never fires twice, and sweeps its own stamps after a week.
+It reads only the last 2MB of the file — transcripts reach 60MB and the newest record is at the end. If the value crosses a band that hasn't fired yet, chonk prints one line to stdout, which Claude Code injects as context for that turn. It records the band in a temp file so the same rung never fires twice, and sweeps its own stamps after a week.
 
 Every failure path is silent. Bad JSON on stdin, missing transcript, unreadable file, unwritable temp dir — chonk returns quietly rather than interfering with your prompt.
 
@@ -125,10 +150,10 @@ Every failure path is silent. Bad JSON on stdin, missing transcript, unreadable 
 
 Worth knowing before you rely on it:
 
-- **It's an estimate.** `chars / 4` is a coarse proxy, and it runs low on CJK text. It's consistent enough to compare sessions against each other, which is all a threshold needs — but it isn't a token count.
-- **It measures cumulative volume, not current context.** These differ. A session that reads one enormous file in five turns has a huge *context* but small *cumulative* total, and chonk won't fire. That's usually the right call — five expensive turns is a few dollars — but it does mean chonk is tuned for the marathon, not the sprint. (See the FAQ.)
-- **It doesn't know about compaction.** Cumulative tokens only go up. After a compaction your live context drops but chonk's number doesn't.
-- **It reads the whole transcript each time.** ~340ms on a 62MB file, imperceptible on normal ones. [Incremental reads are the obvious fix.](https://github.com/Suprhimp/chonk/issues)
+- **It reports the last turn, not the peak.** If a session's final request happened to be small — right after a compaction, say — chonk stays quiet even though the session hit 999K earlier. It's a live gauge, not a high-water mark.
+- **It says nothing about how long you've been at it.** A session can burn real money in twenty turns at 900K without ever being *long*. Context size is the better proxy for cost, but it isn't a proxy for fatigue.
+- **Sub-agent turns are skipped** (`isSidechain`), so a coordinator that delegates heavily reads lower than the work it's actually driving.
+- **The 2MB tail is a heuristic.** A single turn larger than that would be missed. None have been observed; raise `TAIL_BYTES` if yours are.
 - **The transcript format isn't a public API.** It can change. chonk fails silent if it does, but it may silently stop working.
 
 ## FAQ
@@ -141,15 +166,19 @@ Compaction keeps you *inside* the window — it summarizes so the session can co
 
 Tools like ccusage and the various transcript analyzers tell you where your tokens went, afterwards. Useful, and there are several good ones. chonk is the only one I know of that says something *during* the session, when you can still act on it.
 
-### Why not read the exact context size from `usage`?
+### Why live context instead of cumulative session tokens?
 
-You can — every assistant turn in the transcript carries `input_tokens + cache_creation + cache_read`, which is the exact prompt size the API billed. It's precise, it's cheaper to compute, and it drops correctly after compaction.
+chonk started out counting cumulative tokens — everything the session had produced. It seemed like the better proxy for "this has gone on too long," and it was calibrated carefully against a real distribution.
 
-It answers a different question, though. Live context tells you what the *next* turn will cost; cumulative volume tells you how much this session has already consumed. For "should I start fresh," the second one matched my spend distribution better — the sessions that dominated my bill were long marathons, not single turns with huge context. If you'd rather trigger on live context, it's a small change and a PR is welcome.
+It caught 34% of spend. Live context at 500K catches 80%.
+
+The reason is that cost doesn't come from producing text, it comes from re-reading it. A session parked at 999K context for 800 turns generates very little *new* content while quietly costing $0.74 a request. Four of my eight most expensive sessions looked unremarkable by cumulative tokens and had completely filled the window.
+
+If you want the old behavior, `git log` has it — but the numbers argue against it.
 
 ### Will it slow down my prompts?
 
-By 30–340ms depending on transcript size, once per message. The slow end only shows up in the sessions chonk exists to catch.
+About 35–40ms, once per message, flat — it reads a 2MB tail rather than the whole file, so a 62MB transcript costs the same as a small one.
 
 ### Does it send anything anywhere?
 
@@ -159,9 +188,9 @@ No. It reads one file on your disk and prints one line to stdout. There is no ne
 
 Issues and PRs welcome, especially:
 
-- Incremental transcript reads (track a byte offset instead of re-reading)
 - A `--calibrate` mode that reads your own sessions and suggests thresholds
-- Live-context mode as an option alongside cumulative
+- A peak-context mode, so a session that has already been at 999K stays flagged after a compaction
+- Counting sub-agent (`isSidechain`) turns toward the coordinator's total
 
 ## License
 
