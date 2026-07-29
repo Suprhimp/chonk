@@ -186,7 +186,9 @@ No. It reads one file on your disk and prints one line to stdout. There is no ne
 
 ## Contributing
 
-Issues and PRs welcome, especially:
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: it stays one hook doing one thing, and any change to what gets measured needs numbers from real transcripts rather than an argument.
+
+Especially wanted:
 
 - A `--calibrate` mode that reads your own sessions and suggests thresholds
 - A peak-context mode, so a session that has already been at 999K stays flagged after a compaction
