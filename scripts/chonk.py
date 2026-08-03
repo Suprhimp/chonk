@@ -8,8 +8,8 @@ and it *drops* after a compaction, none of which a character count can see.
 
 Why live context and not cumulative session tokens: cost is driven by re-reading
 the same history every turn, not by how much new text was produced. Measured
-over 342 local sessions, a 500K live-context threshold covers ~80% of spend;
-a 350K cumulative-token threshold covered ~34%.
+over 342 local sessions, a 350K cumulative-token threshold covered ~34% of spend
+while live context caught the sessions that actually ran the window to the wall.
 
 Suggests only — never blocks. Fires once per band so it doesn't nag.
 Override both thresholds from /plugin config.
@@ -21,9 +21,16 @@ import sys
 import tempfile
 import time
 
-NUDGE_AT = 500_000      # live context tokens before the first nudge (~half the 1M window)
-REARM_EVERY = 200_000   # re-arm at 700K / 900K — catches the same sessions as 150K
-                        # with ~25 fewer repeat nudges over a 48-day sample
+NUDGE_AT = 300_000      # live context tokens before the first nudge.
+                        # Was 500K, which assumed spend concentrates in a few
+                        # window-filling sessions. On a parallel workload — many
+                        # sessions at once, each moderate — it doesn't: over a
+                        # 41h/32-session sample, 500K covered 6.8% of spend and
+                        # 300K covered 34.4%. Low enough to catch the mid-range
+                        # where the money actually is, high enough that only
+                        # 1 session in 4 ever hears it.
+REARM_EVERY = 200_000   # re-arm at 500K / 700K / 900K — catches the same sessions
+                        # as 150K with ~25 fewer repeat nudges over a 48-day sample
 TAIL_BYTES = 2_000_000  # transcripts reach 60MB+; only the tail holds the newest usage
 
 CHART = ["he chonky", "HEFTY CHONK", "MEGACHONKER", "OH LAWD HE COMIN"]

@@ -71,6 +71,8 @@ Measured across the same 342 sessions, by what share of total spend each trigger
 
 Four of the eight most expensive sessions filled the window to ~999K while never crossing 350K cumulative. chonk reads live context for exactly this reason.
 
+Note the shape of that sample: mostly one session at a time, so spend piled up in a few enormous ones. Run several worktrees at once and it flattens out — see [Configuration](#configuration), where that difference sets the default.
+
 Which means there's exactly one lever: **notice sooner, start a new session.** Not a smarter cache, not a cheaper model — just don't carry 800K tokens of history into a question that needed 20K.
 
 The catch is that starting over feels expensive, because you have to rebuild the context in your head. So chonk writes the handoff for you. That's the actual product; the threshold detection is just the trigger.
@@ -106,7 +108,7 @@ Project-scoped `.claude/settings.json` only covers that one checkout, which is a
 Each time the session grows past another band, chonk moves one rung up. This is how you tell the second nudge from the fourth without reading the number.
 
 ```
-        500K                700K                900K                1.1M
+        300K                500K                700K                900K
                                                                   /\_/\
   ┌───────────┐       ┌───────────┐           /\_/\              ( -.- )
   │           │       │   /\_/\   │       ┌──( -.- )──┐       ┌─(       )─┐
@@ -125,16 +127,26 @@ Run `/plugin config chonk`, or leave it alone — the defaults are measured, not
 
 | option | default | what it does |
 |---|---|---|
-| **First nudge at** | `500000` | Live context tokens before chonk first speaks up |
+| **First nudge at** | `300000` | Live context tokens before chonk first speaks up |
 | **Re-arm every** | `200000` | How much further growth before it speaks again |
 
-500K is about half the 1M window, and the point where the nudge covers ~80% of spend in the sample above. Simulated over 48 days of real sessions it fires about twice a day across ~7 concurrent sessions — roughly one session in three.
+The default moved from 500K to 300K in v0.3.0, and the reason is worth knowing before you tune it.
 
-Drop it to 400K to cover 89% instead of 80%, at ~3 nudges/day. Raise it to 700K for ~1/day and 64% coverage.
+500K assumed spend concentrates in a handful of sessions that fill the window. That holds when you work in one session at a time. It stops holding the moment you run worktrees in parallel — then you have a dozen sessions at 250K each, none of them individually alarming, all of them billing full freight every turn. Measured over 41 hours of exactly that pattern (32 sessions, 3,345 requests):
 
-**Your distribution is not mine.** If you work in short bursts you may never see a nudge; if you run overnight agent sessions you may want it lower. Two numbers, one dialog.
+| first nudge at | sessions it reaches | spend after it fires | nudges |
+|---|---|---|---|
+| 200K | 19 of 32 | 65.3% | 25 |
+| 250K | 12 of 32 | 49.2% | 16 |
+| **300K** | **8 of 32** | **34.4%** | **10** |
+| 400K | 5 of 32 | 19.1% | 6 |
+| 500K | 2 of 32 | 6.8% | 2 |
 
-The re-arm matters more than the first threshold. A session nudged once at 500K will often run to the wall anyway — the reminders at 700K and 900K are what actually curb it.
+300K is the knee. Below it the nudge count climbs faster than the coverage; above it the guardrail quietly stops covering anything. Drop to 250K if you'd trade a nudge every few hours for half your spend.
+
+**Your distribution is not mine.** If you work in short bursts you may never see a nudge; if you run many sessions at once you want it lower, not higher. Two numbers, one dialog — and if it never fires, that's the number to change, not evidence that you're fine.
+
+The re-arm matters more than the first threshold. A session nudged once at 300K will often run to the wall anyway — the reminders at 500K and 700K are what actually curb it.
 
 ## How it works
 
@@ -170,7 +182,7 @@ Tools like ccusage and the various transcript analyzers tell you where your toke
 
 chonk started out counting cumulative tokens — everything the session had produced. It seemed like the better proxy for "this has gone on too long," and it was calibrated carefully against a real distribution.
 
-It caught 34% of spend. Live context at 500K catches 80%.
+At every threshold it landed on, live context caught two to five times more of the spend.
 
 The reason is that cost doesn't come from producing text, it comes from re-reading it. A session parked at 999K context for 800 turns generates very little *new* content while quietly costing $0.74 a request. Four of my eight most expensive sessions looked unremarkable by cumulative tokens and had completely filled the window.
 

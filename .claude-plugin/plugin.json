@@ -1,7 +1,7 @@
 {
   "name": "chonk",
   "displayName": "chonk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tells you when your Claude Code session has gotten too big, and offers a handoff to a fresh one.",
   "author": {
     "name": "Suprhimp",
@@ -22,15 +22,15 @@
     "nudge_at": {
       "type": "number",
       "title": "First nudge at (live context tokens)",
-      "description": "Live context size before the first wrap-up suggestion. Default 500000 — about half the 1M window, and the point that covers ~80% of spend in a 342-session sample. Lower it to catch more, raise it for fewer interruptions.",
-      "default": 500000,
+      "description": "Live context size before the first wrap-up suggestion. Default 300000 — the point where the nudge covers about a third of spend while still only reaching one session in four. Lower it to catch more, raise it for fewer interruptions.",
+      "default": 300000,
       "min": 10000,
       "max": 10000000
     },
     "rearm_every": {
       "type": "number",
       "title": "Re-arm every (tokens)",
-      "description": "How much further growth before chonk speaks up again. Default 200000, so a long session gets reminded at 700K and 900K rather than once and never again.",
+      "description": "How much further growth before chonk speaks up again. Default 200000, so a long session gets reminded at 500K, 700K and 900K rather than once and never again.",
       "default": 200000,
       "min": 10000,
       "max": 10000000
