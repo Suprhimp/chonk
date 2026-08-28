@@ -11,6 +11,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import chonk
 
+for var in ("CLAUDE_PLUGIN_OPTION_NUDGE_AT", "CLAUDE_PLUGIN_OPTION_REARM_EVERY",
+            "CHONK_NUDGE_AT", "CHONK_REARM_EVERY"):
+    os.environ.pop(var, None)
+
 
 def _codex(ic, win=258400):
     return json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {
@@ -36,7 +40,7 @@ def _run(path, tmpdir=None):
                        input=json.dumps({"hook_event_name": "UserPromptSubmit",
                                          "session_id": os.path.basename(path),
                                          "transcript_path": path}),
-                       env=env, capture_output=True, text=True)
+                       env=env, capture_output=True, text=True, check=True)
     return r.stdout.strip()
 
 
