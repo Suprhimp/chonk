@@ -79,10 +79,23 @@ The catch is that starting over feels expensive, because you have to rebuild the
 
 ## Install
 
+**Claude Code:**
+
 ```
 /plugin marketplace add Suprhimp/chonk
 /plugin install chonk@chonk
 ```
+
+**Codex CLI:**
+
+```bash
+codex plugin marketplace add Suprhimp/chonk
+codex plugin add chonk@chonk
+```
+
+Then **trust the hook**: Codex doesn't run a plugin's hooks until you review them — open `/hooks` in Codex and trust chonk (it prints a warning at startup reminding you). Until you do, chonk is installed but inert.
+
+Same script, same nudge — chonk reads Codex's `token_count` events the way it reads Claude Code's `usage` records. Configure the thresholds with the `CHONK_NUDGE_AT` / `CHONK_REARM_EVERY` env vars (Codex has no per-plugin config UI yet). chonk also caps the nudge below the model's context window, so the default fires on Codex's ~258K window instead of sitting unreachably above it.
 
 Or try it without installing:
 
