@@ -57,7 +57,10 @@ assert chonk.current_context(_write(_codex(94_055))) == (94_055, 258_400)
 # --- window cap: 300K default is unreachable on Codex's ~258K window, so it fires ---
 assert _fired(_run(_write(_codex(240_000))))           # 240K > cap(193.8K) → fires
 assert not _fired(_run(_write(_codex(150_000))))       # below cap → silent
-assert not _fired(_run(_write(_codex(240_000, win=353_400))))  # bigger window, cap 265K → silent
+assert not _fired(_run(_write(_codex(240_000, win=353_400))))  # reachable 300K stays → silent
+os.environ["CHONK_NUDGE_AT"] = "220000"
+assert not _fired(_run(_write(_codex(200_000))))       # reachable override stays 220K
+del os.environ["CHONK_NUDGE_AT"]
 
 # --- Claude path unchanged: no window, plain 300K default ---
 assert not _fired(_run(_write(_claude(250_000))))

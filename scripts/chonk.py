@@ -41,9 +41,9 @@ NUDGE_AT = 300_000      # live context tokens before the first nudge.
                         # 1 session in 4 ever hears it.
 REARM_EVERY = 200_000   # re-arm at 500K / 700K / 900K — catches the same sessions
                         # as 150K with ~25 fewer repeat nudges over a 48-day sample
-WINDOW_FRACTION = 0.75  # when the transcript reports the model's context window
-                        # (Codex does; Claude Code doesn't), cap the nudge at this
-                        # fraction of it. A 300K default sits ABOVE Codex's ~258K
+WINDOW_FRACTION = 0.75  # when the configured threshold is at or above the model's
+                        # context window, cap the nudge at this fraction of it.
+                        # A 300K default sits ABOVE Codex's ~258K
                         # window — compaction holds live context under the window,
                         # so a fixed 300K would never fire. Measured over 413 local
                         # Codex sessions, live context topped out at 250K/258K; 0.75
@@ -151,10 +151,10 @@ def main():
     except Exception:
         return
 
-    # Where the transcript reports the model's context window, keep the nudge
-    # below it: compaction holds live context under the window, so a threshold
-    # at or above it (e.g. the 300K default vs Codex's ~258K) never fires.
-    if window and nudge_at > window * WINDOW_FRACTION:
+    # If the configured threshold is unreachable, move it below the window:
+    # compaction keeps live context under the limit, so the 300K default would
+    # otherwise never fire on Codex's ~258K window.
+    if window and nudge_at >= window:
         nudge_at = int(window * WINDOW_FRACTION)
 
     if tokens < nudge_at:
