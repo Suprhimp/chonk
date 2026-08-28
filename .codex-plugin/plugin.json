@@ -1,0 +1,21 @@
+{
+  "name": "chonk",
+  "version": "0.4.0",
+  "description": "Tells you when your Codex session has gotten too big, and offers a handoff to a fresh one.",
+  "author": {
+    "name": "Suprhimp",
+    "url": "https://planningo.io"
+  },
+  "homepage": "https://github.com/Suprhimp/chonk",
+  "repository": "https://github.com/Suprhimp/chonk",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "hook",
+    "context-window",
+    "tokens",
+    "cost",
+    "session"
+  ],
+  "hooks": "./hooks/hooks.json"
+}

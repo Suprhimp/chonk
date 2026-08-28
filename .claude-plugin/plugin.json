@@ -1,7 +1,7 @@
 {
   "name": "chonk",
   "displayName": "chonk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Tells you when your Claude Code session has gotten too big, and offers a handoff to a fresh one.",
   "author": {
     "name": "Suprhimp",

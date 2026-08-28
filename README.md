@@ -79,10 +79,21 @@ The catch is that starting over feels expensive, because you have to rebuild the
 
 ## Install
 
+**Claude Code:**
+
 ```
 /plugin marketplace add Suprhimp/chonk
 /plugin install chonk@chonk
 ```
+
+**Codex CLI:**
+
+```bash
+codex plugin marketplace add Suprhimp/chonk
+codex plugin add chonk@chonk
+```
+
+Same script, same nudge — chonk reads Codex's `token_count` events the way it reads Claude Code's `usage` records. Configure the thresholds with the `CHONK_NUDGE_AT` / `CHONK_REARM_EVERY` env vars (Codex has no per-plugin config UI yet).
 
 Or try it without installing:
 

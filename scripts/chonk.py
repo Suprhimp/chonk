@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook: when the live context gets big, propose wrapping up.
 
-Reads the exact prompt size from the last assistant turn's `usage` record
-(input + cache_creation + cache_read) — what the API actually billed for that
-request. That counts tool results, images, the system prompt and tool schemas,
-and it *drops* after a compaction, none of which a character count can see.
+Works on both Claude Code and Codex CLI — the hook contract is nearly identical
+(stdin JSON with transcript_path, ${CLAUDE_PLUGIN_ROOT} which Codex aliases to
+${PLUGIN_ROOT}, stdout text injected as context). The only real difference is
+the transcript format, and current_context() reads both.
+
+Reads the exact prompt size from the last turn's usage record — what the API
+actually billed for that request. On Claude Code that's the assistant turn's
+`usage` (input + cache_creation + cache_read); on Codex it's the last
+`token_count` event's `info.last_token_usage.input_tokens` (which already
+folds cached tokens in). That counts tool results, images, the system prompt
+and tool schemas, and it *drops* after a compaction — none of which a
+character count can see.
 
 Why live context and not cumulative session tokens: cost is driven by re-reading
 the same history every turn, not by how much new text was produced. Measured
@@ -37,17 +45,39 @@ CHART = ["he chonky", "HEFTY CHONK", "MEGACHONKER", "OH LAWD HE COMIN"]
 
 
 def option(key, fallback):
-    """Read a /plugin config value; Claude Code exports each userConfig option
-    to hook processes as CLAUDE_PLUGIN_OPTION_<KEY>."""
-    try:
-        v = int(float(os.environ[f"CLAUDE_PLUGIN_OPTION_{key}"]))
-        return v if v > 0 else fallback
-    except (KeyError, TypeError, ValueError):
-        return fallback
+    """Read a config override. Claude Code exports each userConfig option to
+    hook processes as CLAUDE_PLUGIN_OPTION_<KEY>; Codex has no such mechanism,
+    so CHONK_<KEY> works as a plain env override on either harness."""
+    for var in (f"CLAUDE_PLUGIN_OPTION_{key}", f"CHONK_{key}"):
+        try:
+            v = int(float(os.environ[var]))
+            if v > 0:
+                return v
+        except (KeyError, TypeError, ValueError):
+            continue
+    return fallback
+
+
+def _line_context(d):
+    """Live context tokens from one transcript line, or 0 if it isn't a usage
+    record. Handles Claude Code (assistant/message.usage) and Codex
+    (event_msg/token_count/info.last_token_usage)."""
+    # Claude Code
+    if d.get("type") == "assistant" and not d.get("isSidechain"):
+        u = (d.get("message") or {}).get("usage") or {}
+        return ((u.get("input_tokens") or 0)
+                + (u.get("cache_creation_input_tokens") or 0)
+                + (u.get("cache_read_input_tokens") or 0))
+    # Codex CLI — input_tokens already includes cached_input_tokens
+    p = d.get("payload") or {}
+    if p.get("type") == "token_count":
+        last = (p.get("info") or {}).get("last_token_usage") or {}
+        return last.get("input_tokens") or 0
+    return 0
 
 
 def current_context(path):
-    """Exact prompt size of the most recent main-thread assistant turn."""
+    """Exact prompt size of the most recent main-thread turn."""
     size = os.path.getsize(path)
     with open(path, "rb") as f:
         f.seek(max(0, size - TAIL_BYTES))
@@ -56,18 +86,13 @@ def current_context(path):
         chunk = chunk.split(b"\n", 1)[-1]      # drop the partial first line
 
     for line in reversed(chunk.splitlines()):
-        if b'"usage"' not in line:
+        if b"usage" not in line:               # matches "usage" and *_token_usage
             continue
         try:
             d = json.loads(line)
         except Exception:
             continue
-        if d.get("type") != "assistant" or d.get("isSidechain"):
-            continue
-        u = (d.get("message") or {}).get("usage") or {}
-        ctx = ((u.get("input_tokens") or 0)
-               + (u.get("cache_creation_input_tokens") or 0)
-               + (u.get("cache_read_input_tokens") or 0))
+        ctx = _line_context(d)
         if ctx:
             return ctx
     return 0
