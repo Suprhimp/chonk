@@ -50,7 +50,7 @@ def _fired(out):
 
 # --- parser: both formats, window surfaced only for Codex ---
 assert chonk.current_context(_write(_claude(1_000))) == (1_000, None)
-p = _write(_claude(9, sidechain=True), _claude(400_000))  # sidechain ignored
+p = _write(_claude(400_000), _claude(9, sidechain=True))  # sidechain ignored
 assert chonk.current_context(p) == (400_000, None)
 assert chonk.current_context(_write(_codex(94_055))) == (94_055, 258_400)
 
