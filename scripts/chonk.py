@@ -3,8 +3,10 @@
 
 Works on both Claude Code and Codex CLI — the hook contract is nearly identical
 (stdin JSON with transcript_path, ${CLAUDE_PLUGIN_ROOT} which Codex aliases to
-${PLUGIN_ROOT}, stdout text injected as context). The only real difference is
-the transcript format, and current_context() reads both.
+${PLUGIN_ROOT}, and a hookSpecificOutput.additionalContext JSON reply both
+harnesses inject). The differences current_context()/main() bridge: the
+transcript format, and Codex's context window (which caps how large live
+context can get, so the nudge threshold is held below it).
 
 Reads the exact prompt size from the last turn's usage record — what the API
 actually billed for that request. On Claude Code that's the assistant turn's
@@ -39,6 +41,13 @@ NUDGE_AT = 300_000      # live context tokens before the first nudge.
                         # 1 session in 4 ever hears it.
 REARM_EVERY = 200_000   # re-arm at 500K / 700K / 900K — catches the same sessions
                         # as 150K with ~25 fewer repeat nudges over a 48-day sample
+WINDOW_FRACTION = 0.75  # when the transcript reports the model's context window
+                        # (Codex does; Claude Code doesn't), cap the nudge at this
+                        # fraction of it. A 300K default sits ABOVE Codex's ~258K
+                        # window — compaction holds live context under the window,
+                        # so a fixed 300K would never fire. Measured over 413 local
+                        # Codex sessions, live context topped out at 250K/258K; 0.75
+                        # (~193K) fires with real runway left to wrap up.
 TAIL_BYTES = 2_000_000  # transcripts reach 60MB+; only the tail holds the newest usage
 
 CHART = ["he chonky", "HEFTY CHONK", "MEGACHONKER", "OH LAWD HE COMIN"]
@@ -59,25 +68,26 @@ def option(key, fallback):
 
 
 def _line_context(d):
-    """Live context tokens from one transcript line, or 0 if it isn't a usage
-    record. Handles Claude Code (assistant/message.usage) and Codex
-    (event_msg/token_count/info.last_token_usage)."""
+    """(live_context_tokens, context_window) from one transcript line, or
+    (0, None) if it isn't a usage record. Window is None when the transcript
+    doesn't report it (Claude Code); Codex reports it per token_count event."""
     # Claude Code
     if d.get("type") == "assistant" and not d.get("isSidechain"):
         u = (d.get("message") or {}).get("usage") or {}
-        return ((u.get("input_tokens") or 0)
-                + (u.get("cache_creation_input_tokens") or 0)
-                + (u.get("cache_read_input_tokens") or 0))
+        return (((u.get("input_tokens") or 0)
+                 + (u.get("cache_creation_input_tokens") or 0)
+                 + (u.get("cache_read_input_tokens") or 0)), None)
     # Codex CLI — input_tokens already includes cached_input_tokens
     p = d.get("payload") or {}
     if p.get("type") == "token_count":
-        last = (p.get("info") or {}).get("last_token_usage") or {}
-        return last.get("input_tokens") or 0
-    return 0
+        info = p.get("info") or {}
+        last = info.get("last_token_usage") or {}
+        return (last.get("input_tokens") or 0, info.get("model_context_window"))
+    return (0, None)
 
 
 def current_context(path):
-    """Exact prompt size of the most recent main-thread turn."""
+    """(prompt size, context window) of the most recent main-thread turn."""
     size = os.path.getsize(path)
     with open(path, "rb") as f:
         f.seek(max(0, size - TAIL_BYTES))
@@ -92,10 +102,10 @@ def current_context(path):
             d = json.loads(line)
         except Exception:
             continue
-        ctx = _line_context(d)
+        ctx, window = _line_context(d)
         if ctx:
-            return ctx
-    return 0
+            return ctx, window
+    return 0, None
 
 
 def already_nudged(session, band):
@@ -137,9 +147,16 @@ def main():
     rearm = option("REARM_EVERY", REARM_EVERY)
 
     try:
-        tokens = current_context(path)
+        tokens, window = current_context(path)
     except Exception:
         return
+
+    # Where the transcript reports the model's context window, keep the nudge
+    # below it: compaction holds live context under the window, so a threshold
+    # at or above it (e.g. the 300K default vs Codex's ~258K) never fires.
+    if window and nudge_at > window * WINDOW_FRACTION:
+        nudge_at = int(window * WINDOW_FRACTION)
+
     if tokens < nudge_at:
         return
 
@@ -149,13 +166,23 @@ def main():
         return
 
     rung = CHART[min(band, len(CHART) - 1)]
-    print(
+    context = (
         f"[chonk] Context is ~{tokens // 1000}K tokens — {rung}. Every further "
         "turn re-reads all of it. Before answering, briefly PROPOSE that this "
         "may be a good point to wrap up and continue in a fresh session (offer "
         "a short handoff: current state + next steps). If they'd rather keep "
         "going, just continue."
     )
+    # JSON hookSpecificOutput.additionalContext is the form both harnesses inject
+    # reliably on UserPromptSubmit. Codex accepts plain stdout in its docs but
+    # shipped Codex plugins use this JSON shape, so it's the safe common path.
+    event = data.get("hook_event_name") or "UserPromptSubmit"
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": context,
+        }
+    }))
 
 
 if __name__ == "__main__":
